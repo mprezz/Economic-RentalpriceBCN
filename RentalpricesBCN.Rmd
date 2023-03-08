@@ -1,0 +1,160 @@
+---
+title: "Rental prices Barcelona"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readr)
+lloguer_2021 <- read_csv("~/Analisis de datos/Datos economicos/Data/lloguer_2021.csv")
+View(lloguer_2021)
+
+lloguer_trim_2018_2021 <- read_csv("~/Analisis de datos/Datos economicos/lloguer_trim_2018_2021.csv")
+View(lloguer_trim_2018_2021)
+
+library(foreign)
+
+library(tidyverse)
+
+library(stargazer)
+
+library(ggeffects)
+
+library(modelsummary)
+
+library(Hmisc)
+
+library(MatchIt)
+
+library(cem)
+
+library(estimatr)
+
+library(contribution)
+
+library(ggplot2)
+
+```
+
+> Vamos a analizar el efecto del color político del municipio sobre el precio del alquiler
+
+```{r, message=FALSE}
+ols.color.preu <- lm(preu ~ alc_partit, data=lloguer_2021)
+summary(ols.color.preu)
+
+stargazer(ols.color.preu, type= "text")
+
+### Hacemos una regresión lineal con las variables de precio y partido político.
+```
+
+> Hasta qué punto podemos decir que el color político del ayuntamiento tiene una influencia causal sobre el precio del alquiler? 
+
+```{r}
+### La Constante nos determina el grupo de referencia, en este caso es Otros (otros partidos):
+
+### La Beta obtenida en PSC indica que el partido tiene precios de alquiler más elevados que no el grupo de referencia Otras y a la vez el resultado es estadísitcament significativo. Pero en el caso de que sea JxCat o ERC quienes gobiernen en el municipio, no es estadísticamente significativo que esté relacionado el partido con los precios del alquiler a pesar de que como Beta es positiva, quiere decir que los precios del alquiler son más elevados con estos partidos que con Otros.
+
+### El efecto del partido político gobernante en los municipios explica un 2,6% de los precios de los alquileres.
+
+### Podemos descartar la hipotesis nula, puesto que la p toma un valor de 0.0000299. La probabilidad de equivocarnos rechazando la hipótesis nula es muy pequeña, y la relación entre las variables es estadísticamente significativa al 99%, por el hecho que p < 0.01.
+```
+
+
+> Vamos a detectar dos posibles variables que influyan en el efecto del color poítico.
+
+
+```{r}
+lloguer_2021 <- lloguer_2021 %>% mutate(pob = (pob_esp + pob_est))
+
+ols.color.pob <- lm(preu ~ alc_partit + pob + pob_cat, data=lloguer_2021)
+
+stargazer(ols.color.preu, ols.color.pob, type= "text")
+
+
+### Las variables del número de población extranjera (españoles + extranjeros) y el número de población catalana son posibles influyentes del efecto del color político. Los partidos JxCat y ERC son partidos independentistas y PSC no, por lo tanto con mayoría de población catalana es más probable que el alcalde sea de JxCat y ERC y en aquellos municipios donde haya gran población española y extranjera es más posible que el alcalde sea del PSC u otros partidos no independentistas.
+```
+
+> ¿Cual es el efecto de estas nuevas variables?
+
+```{r}
+### Las estimaciones resultantes cambian completamente la conclusión sobre el efecto del color político hacia los precios del alquiler que habiamos calculado en un principio. El hecho que haya un gran número de población nacional/extranjera (españoles y extranjeros) es bastante significativo en cuanto el efecto del color político pero tiene todavía más significado estadístico si la población es catalana.
+
+### Por otro lado, el valor de la Constante casi no cambia y muestra un grande significante de los otros partidos en el efecto del color político.
+
+### Podemos observar que pasamos de un 2,6% a 4,8% en p. Por lo tanto, que filtramos el efecto del color político por las variables de población nos explica más sobre los resultados del experimento.
+```
+
+
+> Vamos a detectar si el precio del alquiler ha sufrido un cambio significativo antes y después de la entrada en vigor de la lei en los municipios afectados por esta.
+
+```{r}
+lloguer_trim_2018_2021 <- lloguer_trim_2018_2021 %>% mutate(afectats = ifelse(llei>0,"TRUE","FALSE"))
+
+table(lloguer_trim_2018_2021$afectats)
+
+
+# Fundamentalmente se trata de ver si la intervención pública ha tenido un efecto causal sobre la variable Y de interés, en este caso la entrada en vigor de la ley. Por lo tanto, primero exploraremos la evolución temporal de esta variable en el grupo afectado.
+
+
+lloguer_trim_2018_2021 <- lloguer_trim_2018_2021 %>% mutate(post2020 = as.factor(ntrim >= 12))
+
+t.test(preu ~ post2020, data = subset(lloguer_trim_2018_2021, afectats=="TRUE"))
+
+
+# Los precios del alquiler después de la entrada en vigor de la ley en los municipios es significativamente menor que antes a pesar de que no es estadísticamente significativo puesto que encontramos una p de 0,5.
+
+```
+
+> ¿Existe un problema de inferencia causal sobre el efecto de la lei en los precios de alquiler?
+
+```{r}
+### Tenemos el problema del contrafáctico puesto que los cambios que se hayan podido dar al grupo afectado entre antes y después de la ley pueden ser debidos a esta o a otros factores que afectan a Y.
+
+```
+
+
+```{r}
+did.lm <- lm(preu ~ post2020 + afectats + post2020:afectats, data = lloguer_trim_2018_2021)
+
+stargazer(did.lm, type= "text")
+
+### Utilizamos la técnica Diff-in-Diff. Vemos que el efecto de la ley (post2020) cuando la otra variable de la interacción es cero (por lo tanto, por el grupo afectados=0) es muy relevante, estadísticamente significativo. El efecto de ser del grupo beneficiario (afectados) en comparación con ser del grupo de control cuando la otra variable de la interacción es cero se altamente significativo (140).Por lo tanto, los precios del alquiler bajan con la aplicación de la ley y los afectados se benefician de esto. Finalmente, la interacción post2020*afectados es la estimación D-y-D. Este nos revela que el efecto de la intervención post2020 es negativo para las personas no afectadas (no beneficiarías por la ley). Esta es la doble diferencia que nos interesa: los precios de los alquileres bajan significativamente más en los grupo afectados que el de control.
+```
+
+> Vamos a verlo visualmente
+
+```{r}
+ggpredict(did.lm, terms=c("post2020","afectats"))
+
+pred.did.lm <- ggpredict(did.lm, terms=c("post2020","afectats"))
+plot(pred.did.lm)
+
+ggpredict(did.lm, terms=c("post2020","afectats"))
+
+pred.did.logit <- ggpredict(did.lm, terms=c("post2020","afectats"))
+plot(pred.did.logit)
+
+### Los precios bajan considerablemente en el grupo de afectados (unos 575 euros). Mientras que los no afectados casi 700.
+
+```
+
+> Vamos a hacer lo mismo pero ahora analizando el efecto de la lei sobre el nombre de contratos firmados.
+
+```{r}
+did.lm.1 <- lm(contractes ~ post2020 + afectats + post2020:afectats, data = lloguer_trim_2018_2021)
+
+stargazer(did.lm.1, type= "text")
+
+stargazer(did.lm, did.lm.1, type= "text")
+
+
+### Se ha reducido considerablemente la oferta de alquiler como consecuencia de la ley. Además, la intracción post2020*afectados es la estimación D-y-D. Este nos revela que el efecto de la intervención post2020 es positivo para las personas no afectadas (no beneficiarías por la ley).
+```
+
+
+
